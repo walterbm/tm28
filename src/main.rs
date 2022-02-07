@@ -1,3 +1,4 @@
+use std::env;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::str;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -427,7 +428,8 @@ impl DnsPacket {
 }
 
 fn main() {
-    let qname = "wikipedia.com";
+    let qname = std::env::args().nth(1).expect("no domain name given");
+
     let qtype = QueryType::A;
 
     // Using cloudflare's public DNS server

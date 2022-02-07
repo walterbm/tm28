@@ -1,7 +1,6 @@
-use std::fs::File;
-use std::io::Read;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, UdpSocket};
 use std::str;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct ByteBuffer {
     buf: [u8; 512],
@@ -23,7 +22,6 @@ impl ByteBuffer {
     fn read_byte(&mut self) -> u8 {
         let data = self.buf[self.pos];
         self.pos += 1;
-        println!("pos: {}", self.pos);
         return data;
     }
 
@@ -82,6 +80,28 @@ impl ByteBuffer {
         }
 
         str::from_utf8(&data).unwrap().to_string()
+    }
+
+    fn write(&mut self, data: u8) {
+        self.buf[self.pos] = data;
+        self.pos += 1;
+    }
+
+    fn write_two_bytes(&mut self, data: u16) {
+        self.write((data >> 8) as u8);
+        self.write((data & 0xFF) as u8);
+    }
+
+    fn write_labels(&mut self, labels: &String) {
+        for name in labels.split(".") {
+            let len = name.len();
+            // TODO check that name does not exceed max size
+            self.write(len as u8);
+            for byte in name.as_bytes() {
+                self.write(*byte);
+            }
+        }
+        self.write(0)
     }
 }
 
@@ -143,6 +163,27 @@ struct DnsHeader {
 }
 
 impl DnsHeader {
+    pub fn new() -> Self {
+        DnsHeader {
+            id: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .subsec_nanos() as u16,
+            qr: false,
+            opcode: 0,
+            aa: false,
+            tc: false,
+            rd: false,
+            ra: false,
+            z: 0,
+            rcode: ResultCode::NOERROR,
+            qdcount: 0,
+            ancount: 0,
+            nscount: 0,
+            arcount: 0,
+        }
+    }
+
     pub fn from_buffer(buffer: &mut ByteBuffer) -> Self {
         let id = buffer.read_two_bytes();
         let flags = buffer.read_two_bytes();
@@ -167,6 +208,32 @@ impl DnsHeader {
             arcount,
         }
     }
+
+    pub fn to_buffer(&self, buffer: &mut ByteBuffer) {
+        buffer.write_two_bytes(self.id);
+        let mut flags = 0;
+        // TODO this does not handle server-set fields
+        if self.qr {
+            flags |= 0b1000_0000_0000_0000
+        }
+        if self.aa {
+            flags |= 0b0000_0100_0000_0000
+        }
+        if self.tc {
+            flags |= 0b0000_0010_0000_0000
+        }
+        if self.rd {
+            flags |= 0b0000_0001_0000_0000
+        }
+        if self.ra {
+            flags |= 0b0000_0000_1000_0000
+        }
+        buffer.write_two_bytes(flags);
+        buffer.write_two_bytes(self.qdcount);
+        buffer.write_two_bytes(self.ancount);
+        buffer.write_two_bytes(self.nscount);
+        buffer.write_two_bytes(self.arcount);
+    }
 }
 
 #[derive(Debug)]
@@ -180,6 +247,13 @@ impl QueryType {
         match num {
             1 => QueryType::A,
             _ => QueryType::UNKNOWN(num),
+        }
+    }
+
+    fn to_num(&self) -> u16 {
+        match &self {
+            QueryType::A => 1,
+            _ => 1,
         }
     }
 }
@@ -199,12 +273,26 @@ struct DnsQuestion {
 }
 
 impl DnsQuestion {
+    pub fn new(name: String, qtype: QueryType) -> Self {
+        DnsQuestion {
+            name,
+            qtype,
+            class: 1,
+        }
+    }
+
     pub fn from_buffer(buffer: &mut ByteBuffer) -> Self {
         let name = buffer.read_labels();
         let qtype = QueryType::from_num(buffer.read_two_bytes());
         let class = buffer.read_two_bytes();
 
         DnsQuestion { name, qtype, class }
+    }
+
+    pub fn to_buffer(&self, buffer: &mut ByteBuffer) {
+        buffer.write_labels(&self.name);
+        buffer.write_two_bytes(self.qtype.to_num());
+        buffer.write_two_bytes(self.class)
     }
 }
 
@@ -246,8 +334,6 @@ impl DnsRecord {
         let ttl = buffer.read_four_bytes();
         let len = buffer.read_two_bytes();
 
-        println!("class: {}, ttl: {}, len: {}", _class, ttl, len);
-
         match qtype {
             QueryType::A => {
                 let addr = Ipv4Addr::new(
@@ -284,6 +370,16 @@ struct DnsPacket {
 }
 
 impl DnsPacket {
+    pub fn new() -> Self {
+        DnsPacket {
+            header: DnsHeader::new(),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additional: Vec::new(),
+        }
+    }
+
     pub fn from_buffer(buffer: &mut ByteBuffer) -> Self {
         let header = DnsHeader::from_buffer(buffer);
         let mut questions: Vec<DnsQuestion> = Vec::new();
@@ -315,12 +411,45 @@ impl DnsPacket {
             additional,
         }
     }
+
+    pub fn to_buffer(&mut self, buffer: &mut ByteBuffer) {
+        self.header.qdcount = self.questions.len() as u16;
+        self.header.ancount = self.answers.len() as u16;
+        self.header.nscount = self.authorities.len() as u16;
+        self.header.arcount = self.additional.len() as u16;
+
+        self.header.to_buffer(buffer);
+
+        for question in &self.questions {
+            question.to_buffer(buffer);
+        }
+    }
 }
 
 fn main() {
-    let mut f = File::open("response_packet.txt").unwrap();
+    let qname = "wikipedia.com";
+    let qtype = QueryType::A;
+
+    // Using cloudflare's public DNS server
+    let server = ("1.1.1.1", 53);
+
+    let socket = UdpSocket::bind(("0.0.0.0", 44444)).expect("unable to bind to UDP port 44444");
+
+    let mut packet = DnsPacket::new();
+
+    packet.header.rd = true;
+    packet
+        .questions
+        .push(DnsQuestion::new(qname.to_string(), qtype));
+
     let mut buffer = ByteBuffer::new();
-    f.read(&mut buffer.buf).unwrap();
+    packet.to_buffer(&mut buffer);
+
+    // Send packet to the server using our socket:
+    socket.send_to(&buffer.buf[0..buffer.pos], server).unwrap();
+
+    let mut buffer = ByteBuffer::new();
+    socket.recv_from(&mut buffer.buf).unwrap();
 
     let packet = DnsPacket::from_buffer(&mut buffer);
     println!("{:#?}", packet.header);

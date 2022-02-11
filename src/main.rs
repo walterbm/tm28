@@ -1,5 +1,5 @@
 use std::net::{Ipv4Addr, UdpSocket};
-use std::str;
+use std::str::{self, FromStr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 struct ByteBuffer {
@@ -269,6 +269,19 @@ impl QueryType {
     }
 }
 
+impl FromStr for QueryType {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<QueryType, Self::Err> {
+        match input {
+            "A" => Ok(QueryType::A),
+            "NS" => Ok(QueryType::NS),
+            "CNAME" => Ok(QueryType::CNAME),
+            _ => Err(()),
+        }
+    }
+}
+
 /*
 | Field  | Type           | Description                                                          |
 | ------ | -------------- | -------------------------------------------------------------------- |
@@ -468,10 +481,15 @@ impl DnsPacket {
 }
 
 fn main() {
+    // TODO convert expects into nicer error outputs
     let qname = std::env::args().nth(1).expect("no domain name given");
-
-    // TODO allow this to be passed in as a CLI arg
-    let qtype = QueryType::A;
+    let qtype = match std::env::args().nth(2) {
+        Some(qtype) => QueryType::from_str(&qtype).expect(&format!(
+            "did not recognize: '{}' as a valid DNS record query type",
+            qtype
+        )),
+        None => QueryType::A,
+    };
 
     // Using cloudflare's public DNS server
     let server = ("1.1.1.1", 53);

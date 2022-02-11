@@ -14,4 +14,6 @@ cargo run {domain}
 
 ## Acknowledgments
 
-This project draws heavy inspiration from Emil Hernvall's [DNS Guide](https://github.com/EmilHernvall/dnsguide), Paul Carleton's [Dumb Dig Clone](https://pcarleton.com/2018/02/19/drt-dns-dig/), and Duke University's [DNS Primer](https://courses.cs.duke.edu//fall16/compsci356/DNS/DNS-primer.pdf)
+Canonical source for all information is [RFC 1035: DOMAIN NAMES - IMPLEMENTATION AND SPECIFICATION](https://www.ietf.org/rfc/rfc1035.txt)
+
+This project also draws heavy inspiration from Emil Hernvall's [DNS Guide](https://github.com/EmilHernvall/dnsguide), Paul Carleton's [Dumb Dig Clone](https://pcarleton.com/2018/02/19/drt-dns-dig/), and Duke University's [DNS Primer](https://courses.cs.duke.edu//fall16/compsci356/DNS/DNS-primer.pdf)

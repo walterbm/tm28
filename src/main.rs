@@ -1,4 +1,3 @@
-use std::env;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::str;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,6 +17,10 @@ impl ByteBuffer {
 
     fn seek(&mut self, new_pos: usize) {
         self.pos = new_pos;
+    }
+
+    fn data(&self) -> &[u8] {
+        &self.buf[0..self.pos]
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -80,6 +83,7 @@ impl ByteBuffer {
             self.seek(final_position)
         }
 
+        // TODO return a result to remove unwrap
         str::from_utf8(&data).unwrap().to_string()
     }
 
@@ -240,13 +244,17 @@ impl DnsHeader {
 #[derive(Debug)]
 pub enum QueryType {
     UNKNOWN(u16),
-    A, // 1
+    A,     // 1
+    NS,    // 2
+    CNAME, // 5
 }
 
 impl QueryType {
     fn from_num(num: u16) -> QueryType {
         match num {
             1 => QueryType::A,
+            2 => QueryType::NS,
+            5 => QueryType::CNAME,
             _ => QueryType::UNKNOWN(num),
         }
     }
@@ -254,7 +262,9 @@ impl QueryType {
     fn to_num(&self) -> u16 {
         match &self {
             QueryType::A => 1,
-            _ => 1,
+            QueryType::NS => 2,
+            QueryType::CNAME => 5,
+            _ => 0,
         }
     }
 }
@@ -325,6 +335,28 @@ pub enum DnsRecord {
         addr: Ipv4Addr,
         ttl: u32,
     }, // 1
+    /*
+    | Field      | Type            | Description                                                                       |
+    | ---------- | --------------- | --------------------------------------------------------------------------------- |
+    | Preamble   | Record Preamble | The record preamble, as described above                                           |
+    | Host       | Label           | The Name Server for the domain, as a label sequence                               |
+    */
+    NS {
+        domain: String,
+        host: String,
+        ttl: u32,
+    }, // 2
+    /*
+    | Field      | Type            | Description                                                                       |
+    | ---------- | --------------- | --------------------------------------------------------------------------------- |
+    | Preamble   | Record Preamble | The record preamble, as described above                                           |
+    | Host       | Label           | The Canonical Name for the domain, as a label sequence                            |
+    */
+    CNAME {
+        domain: String,
+        host: String,
+        ttl: u32,
+    }, // 5
 }
 
 impl DnsRecord {
@@ -344,6 +376,14 @@ impl DnsRecord {
                     buffer.read_byte(),
                 );
                 DnsRecord::A { domain, addr, ttl }
+            }
+            QueryType::NS => {
+                let host = buffer.read_labels();
+                DnsRecord::NS { domain, host, ttl }
+            }
+            QueryType::CNAME => {
+                let host = buffer.read_labels();
+                DnsRecord::CNAME { domain, host, ttl }
             }
             QueryType::UNKNOWN(_) => DnsRecord::UNKNOWN {
                 domain,
@@ -430,6 +470,7 @@ impl DnsPacket {
 fn main() {
     let qname = std::env::args().nth(1).expect("no domain name given");
 
+    // TODO allow this to be passed in as a CLI arg
     let qtype = QueryType::A;
 
     // Using cloudflare's public DNS server
@@ -448,7 +489,7 @@ fn main() {
     packet.to_buffer(&mut buffer);
 
     // Send packet to the server using our socket:
-    socket.send_to(&buffer.buf[0..buffer.pos], server).unwrap();
+    socket.send_to(buffer.data(), server).unwrap();
 
     let mut buffer = ByteBuffer::new();
     socket.recv_from(&mut buffer.buf).unwrap();

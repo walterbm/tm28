@@ -6,7 +6,7 @@
 
 ## Run
 
-Currently TM28 is **very** limited and only allows querying for A Records
+Currently TM28 is **very** limited and only allows querying for A, CNAME, NS, MX Records
 
 ```
 cargo run {domain}

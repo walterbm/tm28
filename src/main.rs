@@ -247,6 +247,7 @@ pub enum QueryType {
     A,     // 1
     NS,    // 2
     CNAME, // 5
+    MX,    // 15
 }
 
 impl QueryType {
@@ -255,6 +256,7 @@ impl QueryType {
             1 => QueryType::A,
             2 => QueryType::NS,
             5 => QueryType::CNAME,
+            15 => QueryType::MX,
             _ => QueryType::UNKNOWN(num),
         }
     }
@@ -264,6 +266,7 @@ impl QueryType {
             QueryType::A => 1,
             QueryType::NS => 2,
             QueryType::CNAME => 5,
+            QueryType::MX => 15,
             _ => 0,
         }
     }
@@ -277,6 +280,7 @@ impl FromStr for QueryType {
             "A" => Ok(QueryType::A),
             "NS" => Ok(QueryType::NS),
             "CNAME" => Ok(QueryType::CNAME),
+            "MX" => Ok(QueryType::MX),
             _ => Err(()),
         }
     }
@@ -370,6 +374,19 @@ pub enum DnsRecord {
         host: String,
         ttl: u32,
     }, // 5
+    /*
+    | Field      | Type              | Description                                                                       |
+    | ---------- | ----------------- | --------------------------------------------------------------------------------- |
+    | Preamble   | Record Preamble   | The record preamble, as described above                                           |
+    | Preference | Record Preference | Two byte preference value (lowest-numbered records chosen first)                  |
+    | Host       | Label             | A host willing to act as a mail exchange for the domain                           |
+    */
+    MX {
+        domain: String,
+        preference: u16,
+        host: String,
+        ttl: u32,
+    }, // 5
 }
 
 impl DnsRecord {
@@ -397,6 +414,16 @@ impl DnsRecord {
             QueryType::CNAME => {
                 let host = buffer.read_labels();
                 DnsRecord::CNAME { domain, host, ttl }
+            }
+            QueryType::MX => {
+                let preference = buffer.read_two_bytes();
+                let host = buffer.read_labels();
+                DnsRecord::MX {
+                    domain,
+                    host,
+                    ttl,
+                    preference,
+                }
             }
             QueryType::UNKNOWN(_) => DnsRecord::UNKNOWN {
                 domain,
